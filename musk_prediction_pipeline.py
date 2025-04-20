@@ -4,7 +4,7 @@
 Models included
 ---------------
 * **Linear Regression** (plain logits → softmax)
-* **Polynomial‑kernel Ridge Regression** (`--model poly`, default degree 3)
+* **Polynomial‑kernel Ridge Regression** (`--model poly`, default degree 3)
 * **ARIMA → Poisson PMF** (`--model arima`)
 * **LSTM** sequence model (`--model lstm`)
 * **Tiny Transformer** sequence model (`--model trans`)
@@ -12,7 +12,7 @@ Models included
 `--model all` runs every one of the above.
 
 All models are evaluated with **cross‑entropy** (negative log‑likelihood).
-Progress bars appear every 5 epochs for sequence models.
+Progress bars appear every 5 epochs for sequence models.
 """
 
 import argparse, warnings, datetime as dt
@@ -126,12 +126,22 @@ def softmax_np(z: np.ndarray) -> np.ndarray:
     return e / e.sum(1, keepdims=True)
 
 
+def save_predictions(y_pred, model_name):
+    """Save model predictions to CSV"""
+    bins = [f"{i*BIN_WIDTH}-{(i+1)*BIN_WIDTH}" for i in range(N_BINS-1)]
+    bins.append(f"{MAX_BIN}+")
+    df = pd.DataFrame(y_pred, columns=bins)
+    df.to_csv(f"{model_name}_pmf_predictions.csv", index=False)
+    print(f"Saved predictions to {model_name}_pmf_predictions.csv")
+
 def linreg_model(X, y):
     from sklearn.linear_model import LinearRegression
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=.2, shuffle=False)
     m = LinearRegression().fit(Xtr, np.log(ytr + 1e-12))
-    ce = log_loss(yte, softmax_np(m.predict(Xte)))
+    preds = softmax_np(m.predict(Xte))
+    ce = log_loss(yte, preds)
     print(f"Linear Regression cross entropy: {ce:.4f}")
+    save_predictions(preds, "lin_reg")
     return m
 
 # ----- Kernelized (Polynomial) Ridge Regression -----
@@ -141,8 +151,10 @@ def poly_model(X, y, degree: int = 3):
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=.2, shuffle=False)
     model = KernelRidge(kernel="polynomial", degree=degree, alpha=1.0)
     model.fit(Xtr, np.log(ytr + 1e-12))
-    ce = log_loss(yte, softmax_np(model.predict(Xte)))
+    preds = softmax_np(model.predict(Xte))
+    ce = log_loss(yte, preds)
     print(f"Polynomial Kernel Ridge (degree={degree}) cross entropy: {ce:.4f}")
+    save_predictions(preds, "poly_ridge")
     return model
 
 # ----- ARIMA → Poisson PMF -----
@@ -152,10 +164,40 @@ def arima_model(tweet_csv: Path, days: int):
     import scipy.stats as st
     from statsmodels.tsa.arima.model import ARIMA
 
-    # ... [omitted for brevity, unchanged code] ...
-    ce = log_loss(y_true, y_pred, labels=list(range(N_BINS)))
+    # Load and prepare data
+    t = pd.read_csv(tweet_csv, parse_dates=["createdAt"], low_memory=False)
+    cutoff = pd.Timestamp.utcnow() - pd.Timedelta(days=days)
+    t = t[t["createdAt"] >= cutoff]
+    t["date"] = t["createdAt"].dt.tz_convert("UTC").dt.tz_localize(None).dt.floor("D")
+    daily = t.groupby("date").size().rename("count")
+    
+    # Split into train/test
+    train_size = int(len(daily) * 0.8)
+    train, test = daily[:train_size], daily[train_size:]
+    
+    # Fit ARIMA model
+    model = ARIMA(train, order=(7,1,0))  # Using 7-day seasonality
+    model_fit = model.fit()
+    
+    # Make predictions
+    forecast = model_fit.forecast(steps=len(test))
+    
+    # Convert to PMF
+    y_true = np.array([onehot_count(c) for c in test])
+    y_pred = np.zeros((len(test), N_BINS))
+    for i, mu in enumerate(forecast):
+        # Create Poisson PMF
+        x = np.arange(N_BINS) * BIN_WIDTH
+        pmf = st.poisson.pmf(x, mu)
+        y_pred[i] = pmf / pmf.sum()  # Normalize to sum to 1
+    
+    # Save predictions
+    save_predictions(y_pred, "arima")
+    
+    # Compute cross-entropy manually since y_true is one-hot
+    ce = -np.mean(np.sum(y_true * np.log(y_pred + 1e-12), axis=1))
     print(f"ARIMA→Poisson cross entropy: {ce:.4f}")
-    return model
+    return model_fit
 
 # ----- Sequence models -----
 
@@ -173,27 +215,42 @@ class TinyTrans(nn.Module):
         self.fc=nn.Linear(d_model,N_BINS)
     def forward(self,x): z=self.enc(self.inp(x)); return self.fc(z[:,-1])
 
-def train_seq(model_cls,X,y,epochs,bs=32):
+def train_seq(model_cls, X, y, epochs, bs=32, model_name="seq"):
     SEQ=7; device='cuda' if torch.cuda.is_available() else 'cpu'
     seqs=np.stack([X[i-SEQ:i] for i in range(SEQ,len(X))]).astype(np.float32)
     tars=y[SEQ:].astype(np.float32)
     ds=torch.utils.data.TensorDataset(torch.from_numpy(seqs),torch.from_numpy(tars))
     loader=torch.utils.data.DataLoader(ds,batch_size=bs,shuffle=False)
     net=model_cls.to(device); opt=torch.optim.Adam(net.parameters(),1e-3); ce_fn=nn.CrossEntropyLoss()
-    from math import ceil
-    steps_per_epoch = ceil(len(loader))
+    
+    # Training loop
     for ep in range(1, epochs + 1):
         net.train(); running = 0; n = 0
         loop = tqdm(loader, leave=False, disable=(ep % 5 != 0))
+        all_preds = []
         for xb, yb in loop:
             xb, yb = xb.to(device), yb.to(device)
-            opt.zero_grad(); loss = ce_fn(net(xb), yb.argmax(1))
+            opt.zero_grad()
+            logits = net(xb)
+            loss = ce_fn(logits, yb.argmax(1))
             loss.backward(); opt.step()
             running += loss.item() * xb.size(0); n += xb.size(0)
+            
+            # Save predictions from last epoch
+            if ep == epochs:
+                probs = torch.softmax(logits, dim=1)
+                all_preds.append(probs.detach().cpu().numpy())
+                
             if ep % 5 == 0:
                 loop.set_description(f"epoch {ep:03d}/{epochs}")
         if ep % 5 == 0:
             print(f"epoch {ep:03d}/{epochs} cross entropy: {running / n:.4f}")
+            
+    # Save final predictions
+    if all_preds:
+        final_preds = np.vstack(all_preds)
+        save_predictions(final_preds, model_name)
+    
     return net
 
 
@@ -218,8 +275,8 @@ if __name__ == "__main__":
         linreg_model(X, y)
         poly_model(X, y)
         arima_model(Path(args.tweet_csv), args.days)
-        train_seq(LSTMHead(X.shape[1], 64, 7), X, y, args.epochs)
-        train_seq(TinyTrans(X.shape[1]), X, y, args.epochs)
+        train_seq(LSTMHead(X.shape[1], 64, 7), X, y, args.epochs, model_name="lstm")
+        train_seq(TinyTrans(X.shape[1]), X, y, args.epochs, model_name="transformer")
 
     if args.model == "linreg":
         linreg_model(X, y)
@@ -228,8 +285,8 @@ if __name__ == "__main__":
     elif args.model == "arima":
         arima_model(Path(args.tweet_csv), args.days)
     elif args.model == "lstm":
-        train_seq(LSTMHead(X.shape[1], 64, 7), X, y, args.epochs)
+        train_seq(LSTMHead(X.shape[1], 64, 7), X, y, args.epochs, model_name="lstm")
     elif args.model == "trans":
-        train_seq(TinyTrans(X.shape[1]), X, y, args.epochs)
+        train_seq(TinyTrans(X.shape[1]), X, y, args.epochs, model_name="transformer")
     else:
         run_all()
