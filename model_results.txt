@@ -1,0 +1,95 @@
+**MANUAL NOTE: TIME OF CALCULATION 4/22/2025 2:29 AM**
+
+Using end date: 2025-04-25
+Feature matrix (356, 8), labels (356, 41)
+Using provided current week tweet count: 79
+Linear Regression cross entropy: 4.4932
+Saved predictions to lin_reg_pmf_predictions.csv
+Polynomial Kernel Ridge (degree=3) cross entropy: 8.1274
+Saved predictions to poly_ridge_pmf_predictions.csv
+Saved predictions to arima_pmf_predictions.csv
+ARIMA->Poisson cross entropy: 13.0717
+epoch 005/30 cross entropy: 1.5175
+epoch 010/30 cross entropy: 1.3418
+epoch 015/30 cross entropy: 1.2407
+epoch 020/30 cross entropy: 1.1578
+epoch 025/30 cross entropy: 1.0822
+epoch 030/30 cross entropy: 1.0085
+Saved predictions to lstm_pmf_predictions.csv
+epoch 005/30 cross entropy: 1.8217
+epoch 010/30 cross entropy: 1.6342
+epoch 015/30 cross entropy: 1.5967
+epoch 020/30 cross entropy: 1.5588
+epoch 025/30 cross entropy: 1.5198
+epoch 030/30 cross entropy: 1.5184
+Saved predictions to transformer_pmf_predictions.csv
+
+Tomorrow's tweet count predictions:
+----------------------------------------
+Linear       Most likely: 25-50      (p=0.531)
+             Top 3 bins:
+             25-50      p=0.531
+             0-25       p=0.366
+             50-75      p=0.102
+
+Poly         Most likely: 25-50      (p=0.965)
+             Top 3 bins:
+             25-50      p=0.965
+             50-75      p=0.023
+             0-25       p=0.007
+
+ARIMA        Most likely: 50-75      (p=0.812)
+             Top 3 bins:
+             50-75      p=0.812
+             25-50      p=0.188
+             75-100     p=0.000
+
+LSTM         Most likely: 25-50      (p=0.628)
+             Top 3 bins:
+             25-50      p=0.628
+             0-25       p=0.236
+             50-75      p=0.111
+
+Transform    Most likely: 25-50      (p=0.274)
+             Top 3 bins:
+             25-50      p=0.274
+             75-100     p=0.243
+             50-75      p=0.237
+
+
+End of week total tweet count predictions:
+----------------------------------------
+Current week progress: 57.1%
+Remaining days: 3.0
+Current week tweets: 79
+----------------------------------------
+Linear       Most likely: 125-150    (p=0.351)
+             Top 3 bins:
+             125-150    p=0.351
+             150-175    p=0.268
+             100-125    p=0.214
+
+Poly         Most likely: 150-175    (p=0.900)
+             Top 3 bins:
+             150-175    p=0.900
+             175-200    p=0.064
+             125-150    p=0.021
+
+ARIMA        Most likely: 175-200    (p=0.742)
+             Top 3 bins:
+             175-200    p=0.742
+             150-175    p=0.170
+             200-225    p=0.087
+
+LSTM         Most likely: 150-175    (p=0.350)
+             Top 3 bins:
+             150-175    p=0.350
+             125-150    p=0.297
+             175-200    p=0.161
+
+Transform    Most likely: 225-250    (p=0.170)
+             Top 3 bins:
+             225-250    p=0.170
+             200-225    p=0.164
+             250-275    p=0.147
+
